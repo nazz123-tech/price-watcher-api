@@ -1,3 +1,7 @@
 node_modules/
 .env
 .DS_Store
+
+# Postman local workspace files (may contain tokens)
+.postman/
+postman/

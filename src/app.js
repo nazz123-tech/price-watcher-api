@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const config = require("./config");
+const itemsRouter = require("./routes/items");
 
 const app = express();
 
@@ -12,6 +13,8 @@ app.use(express.json());
 app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
+
+app.use("/items", itemsRouter);
 
 // Any route we don't know about.
 app.use((req, res) => {
