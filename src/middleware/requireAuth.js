@@ -26,6 +26,7 @@ async function requireAuth(req, res, next) {
   }
 
   req.userId = data.user.id;
+  req.userEmail = data.user.email; // shown on the Settings page
   next();
 }
 
