@@ -1,29 +1,18 @@
 const express = require("express");
 const supabase = require("../lib/supabase");
 const requireAuth = require("../middleware/requireAuth");
+const { checkText, isUuid } = require("../lib/validate");
 
 const router = express.Router();
 
 // Every /items route needs a logged-in user.
 router.use(requireAuth);
 
-const MAX_TEXT_LENGTH = 100;
 // numeric(10,2) in the database can hold at most 99 999 999.99.
 const MAX_PRICE = 99999999.99;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // --- Validation helpers ---------------------------------------------------
 // Each one returns { value } when the input is OK, or { error } when not.
-
-function checkText(value, field) {
-  if (typeof value !== "string" || value.trim() === "") {
-    return { error: `${field} must be a non-empty text` };
-  }
-  if (value.trim().length > MAX_TEXT_LENGTH) {
-    return { error: `${field} can be at most ${MAX_TEXT_LENGTH} characters` };
-  }
-  return { value: value.trim() };
-}
 
 // Search words are stored lowercase with single spaces, so "Tine  Lettmelk"
 // and "tine lettmelk" share one row in price_cache and one Kassalapp call.
@@ -46,6 +35,12 @@ function checkPrice(value) {
   return { value: Math.round(price * 100) / 100 };
 }
 
+function checkListId(value) {
+  if (value === null) return { value: null };
+  if (!isUuid(value)) return { error: "list_id must be a list id or null" };
+  return { value };
+}
+
 // Validates the fields present in the body. With partial = true (PATCH),
 // missing fields are allowed; otherwise (POST) all three are required.
 function validateItem(body, partial) {
@@ -62,15 +57,35 @@ function validateItem(body, partial) {
     fields[field] = result.value;
   }
 
+  // list_id is optional in both POST and PATCH.
+  if (body.list_id !== undefined) {
+    const result = checkListId(body.list_id);
+    if (result.error) return { error: result.error };
+    fields.list_id = result.value;
+  }
+
   if (partial && Object.keys(fields).length === 0) {
-    return { error: "Send at least one of name, search, target_price" };
+    return { error: "Send at least one of name, search, target_price, list_id" };
   }
   return { fields };
 }
 
 // --- Routes -----------------------------------------------------------------
 
-const ITEM_COLUMNS = "id, name, search, target_price, created_at";
+const ITEM_COLUMNS = "id, name, search, target_price, list_id, created_at";
+
+// The database only checks that the list exists, so we check that it's the user's own.
+async function isOwnList(listId, userId) {
+  if (listId === null || listId === undefined) return true;
+  const { data, error } = await supabase
+    .from("lists")
+    .select("id")
+    .eq("id", listId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+}
 
 // GET /items: my groceries, each with the latest cached price (or null).
 router.get("/", async (req, res) => {
@@ -113,6 +128,9 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   const { fields, error: validationError } = validateItem(req.body || {}, false);
   if (validationError) return res.status(400).json({ error: validationError });
+  if (!(await isOwnList(fields.list_id, req.userId))) {
+    return res.status(400).json({ error: "List not found" });
+  }
 
   const { data, error } = await supabase
     .from("watch_items")
@@ -127,11 +145,14 @@ router.post("/", async (req, res) => {
 
 // PATCH /items/:id: change name, search and/or target_price.
 router.patch("/:id", async (req, res) => {
-  if (!UUID_PATTERN.test(req.params.id)) {
+  if (!isUuid(req.params.id)) {
     return res.status(404).json({ error: "Item not found" });
   }
   const { fields, error: validationError } = validateItem(req.body || {}, true);
   if (validationError) return res.status(400).json({ error: validationError });
+  if (!(await isOwnList(fields.list_id, req.userId))) {
+    return res.status(400).json({ error: "List not found" });
+  }
 
   const { data, error } = await supabase
     .from("watch_items")
@@ -148,7 +169,7 @@ router.patch("/:id", async (req, res) => {
 
 // DELETE /items/:id: remove a grocery.
 router.delete("/:id", async (req, res) => {
-  if (!UUID_PATTERN.test(req.params.id)) {
+  if (!isUuid(req.params.id)) {
     return res.status(404).json({ error: "Item not found" });
   }
 

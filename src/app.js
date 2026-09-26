@@ -3,6 +3,7 @@ const cors = require("cors");
 const config = require("./config");
 const itemsRouter = require("./routes/items");
 const settingsRouter = require("./routes/settings");
+const listsRouter = require("./routes/lists");
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.get("/health", (req, res) => {
 
 app.use("/items", itemsRouter);
 app.use("/settings", settingsRouter);
+app.use("/lists", listsRouter);
 
 // Any route we don't know about.
 app.use((req, res) => {
