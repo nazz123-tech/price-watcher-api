@@ -19,10 +19,21 @@ const PAGE_SIZE = 1000; // Supabase returns at most 1000 rows per request
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// The logs can be public (GitHub Actions in a public repo), so never print
+// full email addresses: "road2thedream1@gmail.com" -> "ro***@gmail.com".
+function maskEmails(text) {
+  return String(text).replace(/([\w.+-]{1,2})[\w.+-]*@([\w-]+(\.[\w-]+)+)/g, "$1***@$2");
+}
+
+// Short user id for logs: enough to find the user in Supabase, not the whole id.
+function shortId(userId) {
+  return String(userId).slice(0, 8);
+}
+
 function errorMessage(err) {
   // axios errors carry the HTTP status, which says the most (401, 429, 500…).
   if (err.response) return `HTTP ${err.response.status} ${JSON.stringify(err.response.data).slice(0, 200)}`;
-  return err.message;
+  return maskEmails(err.message);
 }
 
 // Loads every row of a table, one page at a time.
@@ -142,16 +153,16 @@ async function main() {
       });
 
       if (dryRun) {
-        console.log(`\n--- Would send to ${email} ---\nSubject: ${message.subject}\n\n${message.text}\n`);
+        console.log(`\n--- Would send to ${maskEmails(email)} ---\nSubject: ${message.subject}\n\n${message.text}\n`);
       } else {
         await sendEmail({ to: email, ...message });
-        console.log(`  Sent ${deals.length} deal(s) to ${email}`);
+        console.log(`  Sent ${deals.length} deal(s) to ${maskEmails(email)}`);
       }
       sent++;
     } catch (err) {
       // Log and keep going with the next user.
-      failures.push({ userId, error: errorMessage(err) });
-      console.error(`  Email to user ${userId} FAILED: ${errorMessage(err)}`);
+      failures.push({ userId: shortId(userId), error: errorMessage(err) });
+      console.error(`  Email to user ${shortId(userId)} FAILED: ${errorMessage(err)}`);
     }
   }
 

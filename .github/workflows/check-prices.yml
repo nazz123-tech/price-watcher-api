@@ -1,0 +1,54 @@
+# The daily price check (src/jobs/checkPrices.js), run by GitHub Actions for free.
+# It replaces a Render Cron Job. The secrets are set in the repo:
+# Settings -> Secrets and variables -> Actions.
+name: Daily price check
+
+on:
+  schedule:
+    # Every day at 06:00 UTC = 08:00 in Norway in summer, 07:00 in winter.
+    # GitHub can start scheduled runs a few (sometimes 15-30) minutes late.
+    - cron: "0 6 * * *"
+  # Adds a "Run workflow" button in the Actions tab, for testing.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: check prices but don't send emails"
+        type: boolean
+        default: false
+
+# Never run two price checks at the same time.
+concurrency:
+  group: check-prices
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check-prices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Check prices and send emails
+        run: node src/jobs/checkPrices.js ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+          KASSALAPP_API_KEY: ${{ secrets.KASSALAPP_API_KEY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          REMINDER_FROM: ${{ secrets.REMINDER_FROM }}
