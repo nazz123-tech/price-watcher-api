@@ -37,16 +37,18 @@ function buildDealsEmail({ firstName, deals, frontendUrl }) {
 
   const greeting = firstName ? `Hi ${firstName},` : "Hi,";
 
+  // Worded as a notification the user asked for ("Price alert"), not as marketing
+  // ("Deal!"), which spam filters treat more kindly.
   let subject;
   let intro;
   if (deals.length === 1) {
     const deal = deals[0];
     const store = deal.store ? ` at ${deal.store}` : "";
-    subject = `Deal: ${deal.name} ${formatPrice(deal.price)}${store}`;
-    intro = "You have 1 grocery deal today:";
+    subject = `Price alert: ${deal.name} is ${formatPrice(deal.price)}${store}`;
+    intro = "1 grocery hit your target price today:";
   } else {
-    subject = `${deals.length} grocery deals today`;
-    intro = `You have ${deals.length} grocery deals today:`;
+    subject = `Price alert: ${deals.length} groceries hit your target`;
+    intro = `${deals.length} groceries hit your target price today:`;
   }
   // Subjects must be one line, even if a name somehow contains a newline.
   subject = subject.replace(/\s+/g, " ").trim();
@@ -69,8 +71,14 @@ function buildDealsEmail({ firstName, deals, frontendUrl }) {
     .join("\n")
     .replace(/\n{3,}/g, "\n\n"); // collapse double blank lines
 
+  // A complete HTML document (charset, title) looks less like spam than a bare fragment.
   const html = `<!doctype html>
-<html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHtml(subject)}</title>
+  </head>
   <body>
     <p>${escapeHtml(greeting)}</p>
     <p>${escapeHtml(intro)}</p>
@@ -86,7 +94,8 @@ ${deals.map((deal) => `      <li>${escapeHtml(dealLine(deal))}</li>`).join("\n")
 </html>
 `;
 
-  return { subject, text, html };
+  // unsubscribeUrl becomes the List-Unsubscribe header (see mailer.js).
+  return { subject, text, html, unsubscribeUrl: settingsUrl };
 }
 
 module.exports = { buildDealsEmail, escapeHtml };
