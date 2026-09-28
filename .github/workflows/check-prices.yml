@@ -5,9 +5,13 @@ name: Daily price check
 
 on:
   schedule:
-    # Every day at 06:00 UTC = 08:00 in Norway in summer, 07:00 in winter.
-    # GitHub can start scheduled runs a few (sometimes 15-30) minutes late.
-    - cron: "0 6 * * *"
+    # Times are UTC. 06:13 UTC = 08:13 in Norway in summer, 07:13 in winter.
+    # Not on the full hour: GitHub is busiest at :00 and delays or even drops
+    # scheduled runs then, which is how we once missed a morning.
+    - cron: "13 6 * * *"
+    # Backup in case GitHub skipped the first one. It does nothing if the
+    # first run already succeeded today (see "Skip if today's check already ran").
+    - cron: "43 7 * * *"
   # Adds a "Run workflow" button in the Actions tab, for testing.
   workflow_dispatch:
     inputs:
@@ -23,6 +27,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read # to see whether today's scheduled run already succeeded
 
 jobs:
   check-prices:
@@ -30,19 +35,37 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      # Only for scheduled runs: if a scheduled run already succeeded today (UTC),
+      # stop here so nobody gets the same email twice.
+      - name: Skip if today's check already ran
+        id: guard
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          today=$(date -u +%Y-%m-%d)
+          done_today=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow check-prices.yml \
+            --event schedule --status success --created ">=$today" --json databaseId --jq 'length')
+          echo "Successful scheduled runs today: $done_today"
+          if [ "$done_today" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; fi
+
       - name: Get the code
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/checkout@v4
 
       - name: Set up Node.js
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
       - name: Install packages
+        if: steps.guard.outputs.skip != 'true'
         run: npm ci
 
       - name: Check prices and send emails
+        if: steps.guard.outputs.skip != 'true'
         run: node src/jobs/checkPrices.js ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
