@@ -5,17 +5,10 @@ const { checkText, isUuid } = require("../lib/validate");
 
 const router = express.Router();
 
-// Every /items route needs a logged-in user.
 router.use(requireAuth);
 
-// numeric(10,2) in the database can hold at most 99 999 999.99.
 const MAX_PRICE = 99999999.99;
 
-// --- Validation helpers ---------------------------------------------------
-// Each one returns { value } when the input is OK, or { error } when not.
-
-// Search words are stored lowercase with single spaces, so "Tine  Lettmelk"
-// and "tine lettmelk" share one row in price_cache and one Kassalapp call.
 function checkSearch(value) {
   const result = checkText(value, "search");
   if (result.error) return result;
@@ -23,7 +16,6 @@ function checkSearch(value) {
 }
 
 function checkPrice(value) {
-  // Accept 25 and "25", but not "", null, true or "abc".
   const price = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
   if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) {
     return { error: "target_price must be a positive number" };
@@ -31,7 +23,6 @@ function checkPrice(value) {
   if (price > MAX_PRICE) {
     return { error: "target_price is too large" };
   }
-  // Round to øre (2 decimals), like the database column.
   return { value: Math.round(price * 100) / 100 };
 }
 
@@ -41,8 +32,6 @@ function checkListId(value) {
   return { value };
 }
 
-// Validates the fields present in the body. With partial = true (PATCH),
-// missing fields are allowed; otherwise (POST) all three are required.
 function validateItem(body, partial) {
   const checks = { name: (v) => checkText(v, "name"), search: checkSearch, target_price: checkPrice };
   const fields = {};
@@ -57,7 +46,6 @@ function validateItem(body, partial) {
     fields[field] = result.value;
   }
 
-  // list_id is optional in both POST and PATCH.
   if (body.list_id !== undefined) {
     const result = checkListId(body.list_id);
     if (result.error) return { error: result.error };
@@ -70,11 +58,8 @@ function validateItem(body, partial) {
   return { fields };
 }
 
-// --- Routes -----------------------------------------------------------------
-
 const ITEM_COLUMNS = "id, name, search, target_price, list_id, created_at";
 
-// The database only checks that the list exists, so we check that it's the user's own.
 async function isOwnList(listId, userId) {
   if (listId === null || listId === undefined) return true;
   const { data, error } = await supabase
@@ -87,7 +72,6 @@ async function isOwnList(listId, userId) {
   return Boolean(data);
 }
 
-// GET /items: my groceries, each with the latest cached price (or null).
 router.get("/", async (req, res) => {
   const { data: items, error } = await supabase
     .from("watch_items")
@@ -96,7 +80,6 @@ router.get("/", async (req, res) => {
     .order("created_at", { ascending: true });
   if (error) throw error;
 
-  // Look up cached prices for all my search terms in one query.
   const searches = [...new Set(items.map((item) => item.search))];
   const pricesBySearch = {};
   if (searches.length > 0) {
@@ -124,7 +107,44 @@ router.get("/", async (req, res) => {
   res.json(result);
 });
 
-// POST /items: add a grocery. Body: { name, search, target_price }
+// Searches watched by at least this many people; fewer could reveal one person's list.
+const MIN_WATCHERS = 2;
+
+// shortcut: reads every watch item and counts in JS; move to a SQL view once there are tens of thousands of rows.
+router.get("/popular", async (req, res) => {
+  const { data: items, error } = await supabase.from("watch_items").select("search, user_id");
+  if (error) throw error;
+
+  const watchers = {};
+  for (const { search, user_id } of items) (watchers[search] ??= new Set()).add(user_id);
+
+  const top = Object.entries(watchers)
+    .map(([search, users]) => ({ search, watchers: users.size }))
+    .filter((row) => row.watchers >= MIN_WATCHERS)
+    .sort((a, b) => b.watchers - a.watchers || a.search.localeCompare(b.search))
+    .slice(0, 12);
+
+  const prices = {};
+  if (top.length > 0) {
+    const { data, error: priceError } = await supabase
+      .from("price_cache")
+      .select("search, price, store, product_name, checked_at")
+      .in("search", top.map((row) => row.search));
+    if (priceError) throw priceError;
+    for (const row of data) prices[row.search] = row;
+  }
+
+  res.json(
+    top.map((row) => ({
+      ...row,
+      price: prices[row.search]?.price ?? null,
+      store: prices[row.search]?.store ?? null,
+      product_name: prices[row.search]?.product_name ?? null,
+      checked_at: prices[row.search]?.checked_at ?? null,
+    })),
+  );
+});
+
 router.post("/", async (req, res) => {
   const { fields, error: validationError } = validateItem(req.body || {}, false);
   if (validationError) return res.status(400).json({ error: validationError });
@@ -134,7 +154,6 @@ router.post("/", async (req, res) => {
 
   const { data, error } = await supabase
     .from("watch_items")
-    // user_id always comes from the token, never from the body.
     .insert({ ...fields, user_id: req.userId })
     .select(ITEM_COLUMNS)
     .single();
@@ -143,7 +162,6 @@ router.post("/", async (req, res) => {
   res.status(201).json(data);
 });
 
-// PATCH /items/:id: change name, search and/or target_price.
 router.patch("/:id", async (req, res) => {
   if (!isUuid(req.params.id)) {
     return res.status(404).json({ error: "Item not found" });
@@ -158,7 +176,7 @@ router.patch("/:id", async (req, res) => {
     .from("watch_items")
     .update(fields)
     .eq("id", req.params.id)
-    .eq("user_id", req.userId) // can only change your own items
+    .eq("user_id", req.userId)
     .select(ITEM_COLUMNS)
     .maybeSingle();
   if (error) throw error;
@@ -167,7 +185,6 @@ router.patch("/:id", async (req, res) => {
   res.json(data);
 });
 
-// DELETE /items/:id: remove a grocery.
 router.delete("/:id", async (req, res) => {
   if (!isUuid(req.params.id)) {
     return res.status(404).json({ error: "Item not found" });
@@ -177,7 +194,7 @@ router.delete("/:id", async (req, res) => {
     .from("watch_items")
     .delete()
     .eq("id", req.params.id)
-    .eq("user_id", req.userId) // can only delete your own items
+    .eq("user_id", req.userId)
     .select("id")
     .maybeSingle();
   if (error) throw error;

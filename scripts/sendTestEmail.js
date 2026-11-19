@@ -1,15 +1,3 @@
-// Sends one example deals email, to check that Gmail sending works.
-//
-//   npm run test-email                          -> sends to GMAIL_USER (yourself)
-//   npm run test-email -- someone@mail.no       -> sends to that address
-//   npm run test-email -- --dry-run             -> only prints the email, sends nothing
-//   npm run test-email -- --url=https://x.app   -> use this app address in the links
-//
-// Links use FRONTEND_URL from .env. Locally that's http://localhost:3000, which
-// looks like spam to mail providers (and doesn't work for the recipient), so when
-// testing with other people, pass your Vercel address with --url.
-//
-// Run this on your computer, not on the Render web service (SMTP is blocked there).
 require("dotenv").config({ quiet: true });
 const { buildDealsEmail } = require("../src/lib/emailTemplate");
 const { isEmailConfigured, sendEmail } = require("../src/lib/mailer");
@@ -28,7 +16,6 @@ async function main() {
     );
   }
 
-  // Realistic example, like a real morning email.
   const email = buildDealsEmail({
     frontendUrl,
     deals: [

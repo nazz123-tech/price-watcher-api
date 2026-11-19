@@ -1,8 +1,9 @@
 const axios = require("axios");
 
-// axios client for the Kassalapp grocery price API.
-// Created on first use, so the web service never needs the API key.
 let client = null;
+
+// Online-only stores: nobody can pop in and buy there, so their prices are skipped.
+const EXCLUDED_STORES = new Set(["ODA_NO", "HOLDBART", "HAVARISTEN", "ENGROSSNETT_NO", "FASTCANDY"]);
 
 function getClient() {
   if (client) return client;
@@ -17,8 +18,6 @@ function getClient() {
   return client;
 }
 
-// A product matches if its name contains every search word (case-insensitive).
-// "tine lettmelk" matches "TINE Lettmelk 0,5% 1l" but not "Q Lettmelk 1l".
 function matchesAllWords(productName, search) {
   const name = productName.toLowerCase();
   return search
@@ -28,12 +27,8 @@ function matchesAllWords(productName, search) {
     .every((word) => name.includes(word));
 }
 
-// Returns the cheapest matching product as { price, store, product_name, url },
-// or null when nothing matches. Throws if the API call fails.
 async function findCheapest(search) {
   const response = await getClient().get("/products", {
-    // price_min skips products without a price. Without it, price_asc
-    // sorts those (null) first and all 50 results can be priceless.
     params: { search, size: 50, sort: "price_asc", price_min: 0.01 },
   });
 
@@ -42,6 +37,7 @@ async function findCheapest(search) {
     const price = product.current_price;
     if (typeof price !== "number" || !product.name) continue;
     if (!matchesAllWords(product.name, search)) continue;
+    if (EXCLUDED_STORES.has(product.store?.code)) continue;
     if (!cheapest || price < cheapest.price) {
       cheapest = {
         price,

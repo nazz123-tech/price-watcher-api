@@ -3,22 +3,18 @@ const supabase = require("../lib/supabase");
 const requireAuth = require("../middleware/requireAuth");
 const { checkText, isUuid } = require("../lib/validate");
 
-// Lists group groceries, e.g. "Breakfast", "Dinner", "Snacks".
-// Each grocery belongs to at most one list (watch_items.list_id).
 const router = express.Router();
 
 router.use(requireAuth);
 
 const LIST_COLUMNS = "id, name, created_at";
 
-// Postgres error code for "unique constraint violated" (same name twice).
 const UNIQUE_VIOLATION = "23505";
 
 function duplicateName(res) {
   return res.status(409).json({ error: "You already have a list with that name" });
 }
 
-// GET /lists: my lists, oldest first.
 router.get("/", async (req, res) => {
   const { data, error } = await supabase
     .from("lists")
@@ -29,7 +25,6 @@ router.get("/", async (req, res) => {
   res.json(data);
 });
 
-// POST /lists: create a list. Body: { name }
 router.post("/", async (req, res) => {
   const { value: name, error: validationError } = checkText(req.body?.name, "name");
   if (validationError) return res.status(400).json({ error: validationError });
@@ -45,7 +40,6 @@ router.post("/", async (req, res) => {
   res.status(201).json(data);
 });
 
-// PATCH /lists/:id: rename a list. Body: { name }
 router.patch("/:id", async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(404).json({ error: "List not found" });
   const { value: name, error: validationError } = checkText(req.body?.name, "name");
@@ -65,8 +59,6 @@ router.patch("/:id", async (req, res) => {
   res.json(data);
 });
 
-// DELETE /lists/:id: remove a list. Its groceries stay, just without a list
-// (the database sets their list_id to null).
 router.delete("/:id", async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(404).json({ error: "List not found" });
 
