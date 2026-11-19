@@ -2,6 +2,7 @@ const express = require("express");
 const supabase = require("../lib/supabase");
 const requireAuth = require("../middleware/requireAuth");
 const { checkText, isUuid } = require("../lib/validate");
+const { PRICE_COLUMNS, priceForSearch } = require("../lib/priceCache");
 
 const router = express.Router();
 
@@ -60,6 +61,19 @@ function validateItem(body, partial) {
 
 const ITEM_COLUMNS = "id, name, search, target_price, list_id, created_at";
 
+function withPrice(item, cached) {
+  const price = cached ? cached.price : null;
+  return {
+    ...item,
+    price,
+    store: cached ? cached.store : null,
+    product_name: cached ? cached.product_name : null,
+    image_url: cached ? cached.image_url : null,
+    checked_at: cached ? cached.checked_at : null,
+    is_deal: price !== null && price <= item.target_price,
+  };
+}
+
 async function isOwnList(listId, userId) {
   if (listId === null || listId === undefined) return true;
   const { data, error } = await supabase
@@ -85,26 +99,13 @@ router.get("/", async (req, res) => {
   if (searches.length > 0) {
     const { data: prices, error: priceError } = await supabase
       .from("price_cache")
-      .select("search, price, store, product_name, checked_at")
+      .select(PRICE_COLUMNS)
       .in("search", searches);
     if (priceError) throw priceError;
     for (const row of prices) pricesBySearch[row.search] = row;
   }
 
-  const result = items.map((item) => {
-    const cached = pricesBySearch[item.search];
-    const price = cached ? cached.price : null;
-    return {
-      ...item,
-      price,
-      store: cached ? cached.store : null,
-      product_name: cached ? cached.product_name : null,
-      checked_at: cached ? cached.checked_at : null,
-      is_deal: price !== null && price <= item.target_price,
-    };
-  });
-
-  res.json(result);
+  res.json(items.map((item) => withPrice(item, pricesBySearch[item.search])));
 });
 
 // Searches watched by at least this many people; fewer could reveal one person's list.
@@ -128,7 +129,7 @@ router.get("/popular", async (req, res) => {
   if (top.length > 0) {
     const { data, error: priceError } = await supabase
       .from("price_cache")
-      .select("search, price, store, product_name, checked_at")
+      .select(PRICE_COLUMNS)
       .in("search", top.map((row) => row.search));
     if (priceError) throw priceError;
     for (const row of data) prices[row.search] = row;
@@ -140,6 +141,7 @@ router.get("/popular", async (req, res) => {
       price: prices[row.search]?.price ?? null,
       store: prices[row.search]?.store ?? null,
       product_name: prices[row.search]?.product_name ?? null,
+      image_url: prices[row.search]?.image_url ?? null,
       checked_at: prices[row.search]?.checked_at ?? null,
     })),
   );
@@ -159,7 +161,7 @@ router.post("/", async (req, res) => {
     .single();
   if (error) throw error;
 
-  res.status(201).json(data);
+  res.status(201).json(withPrice(data, await priceForSearch(data.search)));
 });
 
 router.patch("/:id", async (req, res) => {
@@ -182,7 +184,7 @@ router.patch("/:id", async (req, res) => {
   if (error) throw error;
   if (!data) return res.status(404).json({ error: "Item not found" });
 
-  res.json(data);
+  res.json(withPrice(data, await priceForSearch(data.search)));
 });
 
 router.delete("/:id", async (req, res) => {

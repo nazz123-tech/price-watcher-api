@@ -1,6 +1,7 @@
 const config = require("../config");
 const supabase = require("../lib/supabase");
 const { findCheapest } = require("../lib/kassalapp");
+const { savePrice } = require("../lib/priceCache");
 const { isEmailConfigured, sendEmail } = require("../lib/mailer");
 const { buildDealsEmail } = require("../lib/emailTemplate");
 
@@ -40,18 +41,7 @@ async function checkSearches(searches, failures) {
     try {
       const cheapest = await findCheapest(search);
       prices.set(search, cheapest);
-
-      const { error } = await supabase.from("price_cache").upsert(
-        {
-          search,
-          price: cheapest?.price ?? null,
-          store: cheapest?.store ?? null,
-          product_name: cheapest?.product_name ?? null,
-          checked_at: new Date().toISOString(),
-        },
-        { onConflict: "search" }
-      );
-      if (error) throw error;
+      await savePrice(search, cheapest);
 
       console.log(`  ${search}: ${cheapest ? `${cheapest.price} kr at ${cheapest.store}` : "no match"}`);
     } catch (err) {

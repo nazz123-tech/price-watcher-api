@@ -44,6 +44,7 @@ async function findCheapest(search) {
         store: product.store?.name ?? null,
         product_name: product.name,
         url: product.url ?? null,
+        image_url: product.image ?? null,
       };
     }
   }
